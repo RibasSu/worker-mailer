@@ -16,6 +16,7 @@ This repository uses npm's OIDC Trusted Publishing for secure, token-free packag
 
 1. The package must be published at least once using traditional authentication (this is already done for `@ribassu/worker-mailer`)
 2. You must have maintainer/owner permissions on the npm package
+3. npm CLI version 11.5.1 or later is required (already satisfied in GitHub Actions)
 
 ### Configure Trusted Publisher on npmjs.com
 
@@ -26,13 +27,38 @@ This repository uses npm's OIDC Trusted Publishing for secure, token-free packag
 3. **Add a Trusted Publisher**:
    - Click "Add trusted publisher"
    - Select **GitHub Actions** as the provider
-   - Fill in the following details:
+   - Fill in the following details **exactly as shown**:
      - **GitHub User/Organization**: `RibasSu`
      - **Repository**: `worker-mailer`
-     - **Workflow filename**: `publish.yml`
+     - **Workflow filename**: `publish.yml` (must match exactly, including extension)
      - **Environment** (optional): Leave empty (or specify if you use GitHub environments)
 
 4. **Save the configuration**
+
+### Workflow Configuration
+
+The workflow is configured with:
+
+```yaml
+permissions:
+  contents: read
+  id-token: write  # Required for OIDC authentication
+
+- name: Setup Node.js
+  uses: actions/setup-node@v4
+  with:
+    node-version: 20
+    registry-url: 'https://registry.npmjs.org'  # Required for OIDC
+
+- name: Publish to npm
+  run: npm publish --provenance --access public
+  # NO NODE_AUTH_TOKEN needed - authentication via OIDC
+```
+
+**Critical Requirements:**
+- ✅ `id-token: write` permission (enables OIDC token generation)
+- ✅ `registry-url: 'https://registry.npmjs.org'` in setup-node (initializes OIDC auth)
+- ❌ **Do NOT set** `NODE_AUTH_TOKEN` (interferes with OIDC detection)
 
 ### That's It!
 
@@ -41,9 +67,10 @@ Once configured, the workflow will automatically publish to npm without requirin
 ## How It Works
 
 1. GitHub Actions generates a unique OIDC token for each workflow run
-2. npm validates this token matches the trusted publisher configuration
-3. If valid, npm allows the publish operation
-4. Each publish includes automatic provenance attestation
+2. The `registry-url` setting in setup-node configures npm to use OIDC authentication
+3. npm validates this token matches the trusted publisher configuration
+4. If valid, npm allows the publish operation
+5. Each publish includes automatic provenance attestation
 
 ## Verification
 
@@ -56,11 +83,12 @@ npm notice Publishing package with trusted publishing...
 
 ## Troubleshooting
 
-### "Authentication required" error
+### "Authentication required" error (ENEEDAUTH)
 
 - Ensure the trusted publisher is configured correctly on npmjs.com
 - Verify the workflow filename matches exactly (`publish.yml`)
 - Check that repository name matches (`RibasSu/worker-mailer`)
+- Confirm `registry-url` is set in setup-node action
 
 ### "Provenance generation failed"
 
@@ -72,8 +100,15 @@ npm notice Publishing package with trusted publishing...
 - Confirm you have maintainer/owner permissions on the package
 - Double-check trusted publisher settings on npmjs.com
 
+### Still using NODE_AUTH_TOKEN?
+
+- Remove any `NODE_AUTH_TOKEN` from the workflow - it interferes with OIDC
+- Delete the `NPM_TOKEN` secret from repository settings (no longer needed)
+
 ## Additional Resources
 
 - [npm Trusted Publishers Documentation](https://docs.npmjs.com/trusted-publishers)
 - [GitHub Blog: npm Trusted Publishing with OIDC](https://github.blog/changelog/2025-07-31-npm-trusted-publishing-with-oidc-is-generally-available/)
 - [npm Security Changes Announcement](https://github.blog/changelog/2025-09-29-strengthening-npm-security-important-changes-to-authentication-and-token-management/)
+- [Phil Nash: Trusted Publishing Tips](https://philna.sh/blog/2026/01/28/trusted-publishing-npm/)
+- [Comprehensive OIDC Troubleshooting Guide](https://blog.moelove.info/from-deprecated-npm-classic-tokens-to-oidc-trusted-publishing-a-cicd-troubleshooting-journey)
