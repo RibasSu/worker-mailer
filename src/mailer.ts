@@ -2,12 +2,33 @@ import { connect } from 'cloudflare:sockets'
 import { BlockingQueue, decode, encode, execTimeout } from './utils'
 import { Email, EmailOptions } from './email'
 import Logger, { LogLevel } from './logger'
+import {
+  SmtpAuthError,
+  SmtpConnectionError,
+  SmtpRecipientError,
+  SmtpTimeoutError,
+} from './errors'
 
 export type AuthType = 'plain' | 'login' | 'cram-md5'
 export type Credentials = {
   username: string
   password: string
 }
+
+/**
+ * Hooks for WorkerMailer events
+ */
+export type WorkerMailerHooks = {
+  /** Called when a connection to SMTP server is established */
+  onConnect?: () => void | Promise<void>
+  /** Called when an email is successfully sent */
+  onSent?: (email: EmailOptions, response: string) => void | Promise<void>
+  /** Called when an email fails to send */
+  onError?: (email: EmailOptions | null, error: Error) => void | Promise<void>
+  /** Called when the connection is closed */
+  onClose?: (error?: Error) => void | Promise<void>
+}
+
 export type WorkerMailerOptions = {
   host: string
   port: number
@@ -35,6 +56,8 @@ export type WorkerMailerOptions = {
     | undefined
   socketTimeoutMs?: number
   responseTimeoutMs?: number
+  /** Event hooks for monitoring email operations */
+  hooks?: WorkerMailerHooks
 }
 
 export class WorkerMailer {
@@ -76,10 +99,16 @@ export class WorkerMailer {
 
   private readonly sendNotificationsTo: string | undefined
 
+  private readonly hooks: WorkerMailerHooks
+
   private active = false
 
   private emailSending: Email | null = null
-  private emailToBeSent = new BlockingQueue<Email>()
+  private emailSendingOptions: EmailOptions | null = null
+  private emailToBeSent = new BlockingQueue<{
+    email: Email
+    options: EmailOptions
+  }>()
 
   /** SMTP server capabilities **/
   private supportsDSN = false
@@ -101,9 +130,10 @@ export class WorkerMailer {
     this.startTls = options.startTls === undefined ? true : options.startTls
     this.credentials = options.credentials
     this.dsn = options.dsn || {}
+    this.hooks = options.hooks || {}
 
     this.socketTimeoutMs = options.socketTimeoutMs || 60_000
-    this.responseTimeoutMs = options.socketTimeoutMs || 30_000
+    this.responseTimeoutMs = options.responseTimeoutMs || 30_000
     this.socket = connect(
       {
         hostname: this.host,
@@ -136,7 +166,7 @@ export class WorkerMailer {
 
   public send(options: EmailOptions): Promise<void> {
     const email = new Email(options)
-    this.emailToBeSent.enqueue(email)
+    this.emailToBeSent.enqueue({ email, options })
     return email.sent
   }
 
@@ -153,7 +183,7 @@ export class WorkerMailer {
     return execTimeout(
       this.read(),
       this.responseTimeoutMs,
-      new Error('Timeout while waiting for smtp server response'),
+      new SmtpTimeoutError('Timeout while waiting for smtp server response'),
     )
   }
 
@@ -202,23 +232,32 @@ export class WorkerMailer {
 
     await this.auth()
     this.active = true
+
+    // Call onConnect hook
+    await this.hooks.onConnect?.()
   }
 
   private async start() {
     while (this.active) {
-      this.emailSending = await this.emailToBeSent.dequeue()
+      const { email, options } = await this.emailToBeSent.dequeue()
+      this.emailSending = email
+      this.emailSendingOptions = options
       try {
         await this.mail()
         await this.rcpt()
         await this.data()
-        await this.body()
+        const response = await this.body()
         this.emailSending!.setSent()
+        // Call onSent hook
+        await this.hooks.onSent?.(options, response)
       } catch (e: any) {
         this.logger.error('Failed to send email: ' + e.message)
         if (!this.active) {
           return
         }
         this.emailSending.setSentError(e)
+        // Call onError hook
+        await this.hooks.onError?.(options, e)
         try {
           await this.rset()
         } catch (e: any) {
@@ -228,6 +267,7 @@ export class WorkerMailer {
         // otherwise `this.active` will be set to false in `close` function, and loop will be stopped
       }
       this.emailSending = null
+      this.emailSendingOptions = null
     }
   }
 
@@ -238,7 +278,7 @@ export class WorkerMailer {
       error || new Error('WorkerMailer is shutting down'),
     )
     while (this.emailToBeSent.length) {
-      const email = await this.emailToBeSent.dequeue()
+      const { email } = await this.emailToBeSent.dequeue()
       email.setSentError(error || new Error('WorkerMailer is shutting down'))
     }
 
@@ -252,6 +292,9 @@ export class WorkerMailer {
       // maybe socket is closed now
       // anyway, just keep it simple
     }
+
+    // Call onClose hook
+    await this.hooks.onClose?.(error)
   }
 
   private async waitForSocketConnected() {
@@ -259,7 +302,7 @@ export class WorkerMailer {
     await execTimeout(
       this.socket.opened,
       this.socketTimeoutMs,
-      new Error('Socket timeout!'),
+      new SmtpTimeoutError('Socket timeout!'),
     )
     this.logger.info('SMTP server connected')
   }
@@ -267,7 +310,9 @@ export class WorkerMailer {
   private async greet() {
     const response = await this.readTimeout()
     if (!response.startsWith('220')) {
-      throw new Error('Failed to connect to SMTP server: ' + response)
+      throw new SmtpConnectionError(
+        'Failed to connect to SMTP server: ' + response,
+      )
     }
   }
 
@@ -335,7 +380,7 @@ export class WorkerMailer {
       return
     }
     if (!this.credentials) {
-      throw new Error(
+      throw new SmtpAuthError(
         'smtp server requires authentication, but no credentials found',
       )
     }
@@ -355,7 +400,7 @@ export class WorkerMailer {
     ) {
       await this.authWithCramMD5()
     } else {
-      throw new Error('No supported auth method found.')
+      throw new SmtpAuthError('No supported auth method found.')
     }
   }
 
@@ -366,7 +411,7 @@ export class WorkerMailer {
     await this.writeLine(`AUTH PLAIN ${userPassBase64}`)
     const authResult = await this.readTimeout()
     if (!authResult.startsWith('2')) {
-      throw new Error(`Failed to plain authentication: ${authResult}`)
+      throw new SmtpAuthError(`Failed to plain authentication: ${authResult}`)
     }
   }
 
@@ -374,21 +419,21 @@ export class WorkerMailer {
     await this.writeLine(`AUTH LOGIN`)
     const startLoginResponse = await this.readTimeout()
     if (!startLoginResponse.startsWith('3')) {
-      throw new Error('Invalid login: ' + startLoginResponse)
+      throw new SmtpAuthError('Invalid login: ' + startLoginResponse)
     }
 
     const usernameBase64 = btoa(this.credentials!.username)
     await this.writeLine(usernameBase64)
     const userResponse = await this.readTimeout()
     if (!userResponse.startsWith('3')) {
-      throw new Error('Failed to login authentication: ' + userResponse)
+      throw new SmtpAuthError('Failed to login authentication: ' + userResponse)
     }
 
     const passwordBase64 = btoa(this.credentials!.password)
     await this.writeLine(passwordBase64)
     const authResult = await this.readTimeout()
     if (!authResult.startsWith('2')) {
-      throw new Error('Failed to login authentication: ' + authResult)
+      throw new SmtpAuthError('Failed to login authentication: ' + authResult)
     }
   }
 
@@ -399,7 +444,9 @@ export class WorkerMailer {
       .match(/^334\s+(.+)$/)
       ?.pop()
     if (!challengeWithBase64Encoded) {
-      throw new Error('Invalid CRAM-MD5 challenge: ' + challengeResponse)
+      throw new SmtpAuthError(
+        'Invalid CRAM-MD5 challenge: ' + challengeResponse,
+      )
     }
 
     // solve challenge
@@ -429,7 +476,9 @@ export class WorkerMailer {
     )
     const authResult = await this.readTimeout()
     if (!authResult.startsWith('2')) {
-      throw new Error('Failed to cram-md5 authentication: ' + authResult)
+      throw new SmtpAuthError(
+        'Failed to cram-md5 authentication: ' + authResult,
+      )
     }
   }
 
@@ -464,7 +513,10 @@ export class WorkerMailer {
       await this.writeLine(message)
       const rcptResponse = await this.readTimeout()
       if (!rcptResponse.startsWith('2')) {
-        throw new Error(`Invalid ${message} ${rcptResponse}`)
+        throw new SmtpRecipientError(
+          `Invalid ${message} ${rcptResponse}`,
+          user.email,
+        )
       }
     }
   }
@@ -477,12 +529,13 @@ export class WorkerMailer {
     }
   }
 
-  private async body() {
+  private async body(): Promise<string> {
     await this.write(this.emailSending!.getEmailData())
     const response = await this.readTimeout()
     if (!response.startsWith('2')) {
       throw new Error('Failed send email body: ' + response)
     }
+    return response
   }
 
   private async rset() {

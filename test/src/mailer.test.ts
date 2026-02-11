@@ -698,4 +698,175 @@ describe('WorkerMailer', () => {
       expect(mockSocket.close).toHaveBeenCalled()
     })
   })
+
+  describe('hooks', () => {
+    it('should call onConnect hook when connection is established', async () => {
+      const onConnect = vi.fn()
+
+      mockReader.read
+        .mockResolvedValueOnce({
+          value: new TextEncoder().encode('220 smtp.example.com ready\r\n'),
+        })
+        .mockResolvedValueOnce({
+          value: new TextEncoder().encode(
+            '250-smtp.example.com\r\n250-AUTH PLAIN LOGIN\r\n250 AUTH=PLAIN LOGIN\r\n',
+          ),
+        })
+        .mockResolvedValueOnce({
+          value: new TextEncoder().encode('235 Authentication successful\r\n'),
+        })
+
+      await WorkerMailer.connect({
+        host: 'smtp.example.com',
+        port: 587,
+        credentials: {
+          username: 'test@example.com',
+          password: 'password',
+        },
+        authType: ['plain'],
+        hooks: { onConnect },
+      })
+
+      expect(onConnect).toHaveBeenCalledTimes(1)
+    })
+
+    it('should call onSent hook after successful email send', async () => {
+      const onSent = vi.fn()
+
+      mockReader.read
+        .mockResolvedValueOnce({
+          value: new TextEncoder().encode('220 smtp.example.com ready\r\n'),
+        })
+        .mockResolvedValueOnce({
+          value: new TextEncoder().encode(
+            '250-smtp.example.com\r\n250-AUTH PLAIN LOGIN\r\n250 AUTH=PLAIN LOGIN\r\n',
+          ),
+        })
+        .mockResolvedValueOnce({
+          value: new TextEncoder().encode('235 Authentication successful\r\n'),
+        })
+        .mockResolvedValueOnce({
+          value: new TextEncoder().encode('250 OK\r\n'), // MAIL FROM
+        })
+        .mockResolvedValueOnce({
+          value: new TextEncoder().encode('250 OK\r\n'), // RCPT TO
+        })
+        .mockResolvedValueOnce({
+          value: new TextEncoder().encode('354 Start mail input\r\n'), // DATA
+        })
+        .mockResolvedValueOnce({
+          value: new TextEncoder().encode('250 OK: Message queued\r\n'), // End of data
+        })
+
+      const mailer = await WorkerMailer.connect({
+        host: 'smtp.example.com',
+        port: 587,
+        credentials: {
+          username: 'test@example.com',
+          password: 'password',
+        },
+        authType: ['plain'],
+        hooks: { onSent },
+      })
+
+      await mailer.send({
+        from: 'sender@example.com',
+        to: 'recipient@example.com',
+        subject: 'Test',
+        text: 'Hello',
+      })
+
+      expect(onSent).toHaveBeenCalledTimes(1)
+      expect(onSent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          from: 'sender@example.com',
+          to: 'recipient@example.com',
+        }),
+        expect.stringContaining('250'),
+      )
+    })
+
+    it('should call onError hook on send failure', async () => {
+      const onError = vi.fn()
+
+      mockReader.read
+        .mockResolvedValueOnce({
+          value: new TextEncoder().encode('220 smtp.example.com ready\r\n'),
+        })
+        .mockResolvedValueOnce({
+          value: new TextEncoder().encode(
+            '250-smtp.example.com\r\n250-AUTH PLAIN LOGIN\r\n250 AUTH=PLAIN LOGIN\r\n',
+          ),
+        })
+        .mockResolvedValueOnce({
+          value: new TextEncoder().encode('235 Authentication successful\r\n'),
+        })
+        .mockResolvedValueOnce({
+          value: new TextEncoder().encode('553 Invalid sender\r\n'), // MAIL FROM fails
+        })
+
+      const mailer = await WorkerMailer.connect({
+        host: 'smtp.example.com',
+        port: 587,
+        credentials: {
+          username: 'test@example.com',
+          password: 'password',
+        },
+        authType: ['plain'],
+        hooks: { onError },
+      })
+
+      await expect(
+        mailer.send({
+          from: 'sender@example.com',
+          to: 'recipient@example.com',
+          subject: 'Test',
+          text: 'Hello',
+        }),
+      ).rejects.toThrow()
+
+      expect(onError).toHaveBeenCalledTimes(1)
+      expect(onError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          from: 'sender@example.com',
+        }),
+        expect.any(Error),
+      )
+    })
+
+    it('should call onClose hook when connection is closed', async () => {
+      const onClose = vi.fn()
+
+      mockReader.read
+        .mockResolvedValueOnce({
+          value: new TextEncoder().encode('220 smtp.example.com ready\r\n'),
+        })
+        .mockResolvedValueOnce({
+          value: new TextEncoder().encode(
+            '250-smtp.example.com\r\n250-AUTH PLAIN LOGIN\r\n250 AUTH=PLAIN LOGIN\r\n',
+          ),
+        })
+        .mockResolvedValueOnce({
+          value: new TextEncoder().encode('235 Authentication successful\r\n'),
+        })
+        .mockResolvedValueOnce({
+          value: new TextEncoder().encode('221 Bye\r\n'),
+        })
+
+      const mailer = await WorkerMailer.connect({
+        host: 'smtp.example.com',
+        port: 587,
+        credentials: {
+          username: 'test@example.com',
+          password: 'password',
+        },
+        authType: ['plain'],
+        hooks: { onClose },
+      })
+
+      await mailer.close()
+
+      expect(onClose).toHaveBeenCalledTimes(1)
+    })
+  })
 })

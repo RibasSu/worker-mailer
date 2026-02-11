@@ -5,6 +5,8 @@ import {
   encode,
   decode,
   encodeQuotedPrintable,
+  isValidEmail,
+  validateEmails,
 } from '../../src/utils'
 import * as libqp from 'libqp'
 
@@ -464,5 +466,123 @@ describe('encodeQuotedPrintable', () => {
       const decoded = libqp.decode(result).toString()
       expect(decoded.replace(/\r\n/g, '\n')).toBe(input)
     })
+  })
+})
+
+describe('isValidEmail', () => {
+  describe('valid email addresses', () => {
+    it('should accept simple valid email', () => {
+      expect(isValidEmail('test@example.com')).toBe(true)
+    })
+
+    it('should accept email with subdomain', () => {
+      expect(isValidEmail('user@mail.example.com')).toBe(true)
+    })
+
+    it('should accept email with dots in local part', () => {
+      expect(isValidEmail('first.last@example.com')).toBe(true)
+    })
+
+    it('should accept email with plus sign', () => {
+      expect(isValidEmail('user+tag@example.com')).toBe(true)
+    })
+
+    it('should accept email with numbers', () => {
+      expect(isValidEmail('user123@example123.com')).toBe(true)
+    })
+
+    it('should accept email with hyphen in domain', () => {
+      expect(isValidEmail('user@my-domain.com')).toBe(true)
+    })
+
+    it('should accept email with special characters in local part', () => {
+      expect(isValidEmail("user!#$%&'*+/=?^_`{|}~-@example.com")).toBe(true)
+    })
+
+    it('should accept email with long TLD', () => {
+      expect(isValidEmail('user@example.technology')).toBe(true)
+    })
+  })
+
+  describe('invalid email addresses', () => {
+    it('should reject null', () => {
+      expect(isValidEmail(null as unknown as string)).toBe(false)
+    })
+
+    it('should reject undefined', () => {
+      expect(isValidEmail(undefined as unknown as string)).toBe(false)
+    })
+
+    it('should reject empty string', () => {
+      expect(isValidEmail('')).toBe(false)
+    })
+
+    it('should reject non-string', () => {
+      expect(isValidEmail(123 as unknown as string)).toBe(false)
+    })
+
+    it('should reject email without @', () => {
+      expect(isValidEmail('userexample.com')).toBe(false)
+    })
+
+    it('should reject email without domain', () => {
+      expect(isValidEmail('user@')).toBe(false)
+    })
+
+    it('should reject email without local part', () => {
+      expect(isValidEmail('@example.com')).toBe(false)
+    })
+
+    it('should reject email without TLD', () => {
+      expect(isValidEmail('user@localhost')).toBe(false)
+    })
+
+    it('should reject email with single char TLD', () => {
+      expect(isValidEmail('user@example.c')).toBe(false)
+    })
+
+    it('should reject email with space', () => {
+      expect(isValidEmail('user @example.com')).toBe(false)
+    })
+
+    it('should reject email with multiple @', () => {
+      expect(isValidEmail('user@@example.com')).toBe(false)
+    })
+
+    it('should reject email with local part > 64 chars', () => {
+      const longLocal = 'a'.repeat(65)
+      expect(isValidEmail(`${longLocal}@example.com`)).toBe(false)
+    })
+
+    it('should reject email with domain > 255 chars', () => {
+      const longDomain = 'a'.repeat(250) + '.com'
+      expect(isValidEmail(`user@${longDomain}`)).toBe(false)
+    })
+  })
+})
+
+describe('validateEmails', () => {
+  it('should return empty array for all valid emails', () => {
+    const emails = ['user1@example.com', 'user2@example.com', 'user3@test.org']
+    expect(validateEmails(emails)).toEqual([])
+  })
+
+  it('should return invalid emails only', () => {
+    const emails = [
+      'valid@example.com',
+      'invalid',
+      'another@test.com',
+      '@bad.com',
+    ]
+    expect(validateEmails(emails)).toEqual(['invalid', '@bad.com'])
+  })
+
+  it('should return all emails if all invalid', () => {
+    const emails = ['invalid', 'also-invalid', 'nope']
+    expect(validateEmails(emails)).toEqual(['invalid', 'also-invalid', 'nope'])
+  })
+
+  it('should return empty array for empty input', () => {
+    expect(validateEmails([])).toEqual([])
   })
 })

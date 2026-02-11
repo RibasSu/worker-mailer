@@ -1,4 +1,5 @@
-import { encode, encodeQuotedPrintable } from './utils'
+import { encode, encodeQuotedPrintable, isValidEmail } from './utils'
+import { InvalidEmailError, InvalidContentError } from './errors'
 
 export function encodeHeader(text: string): string {
   // If the text contains any non-ASCII characters, encode the whole string
@@ -35,6 +36,16 @@ export function encodeHeader(text: string): string {
 
 export type User = { name?: string; email: string }
 
+export type Attachment = {
+  filename: string
+  content: string
+  mimeType?: string
+  /** Content-ID for inline images (e.g., 'logo@company' for use as <img src="cid:logo@company">) */
+  cid?: string
+  /** If true, attachment will be inline (requires cid) */
+  inline?: boolean
+}
+
 export type EmailOptions = {
   from: string | User
   to: string | string[] | User | User[]
@@ -45,7 +56,7 @@ export type EmailOptions = {
   text?: string
   html?: string
   headers?: Record<string, string>
-  attachments?: { filename: string; content: string; mimeType?: string }[]
+  attachments?: Attachment[]
   dsnOverride?: {
     envelopeId?: string
     RET?: {
@@ -83,11 +94,7 @@ export class Email {
     }
   }
 
-  public readonly attachments?: {
-    filename: string
-    content: string
-    mimeType?: string
-  }[]
+  public readonly attachments?: Attachment[]
 
   public readonly headers: Record<string, string>
 
@@ -100,7 +107,9 @@ export class Email {
 
   constructor(options: EmailOptions) {
     if (!options.text && !options.html) {
-      throw new Error('At least one of text or html must be provided')
+      throw new InvalidContentError(
+        'At least one of text or html must be provided',
+      )
     }
 
     if (typeof options.from === 'string') {
@@ -116,6 +125,9 @@ export class Email {
     this.to = Email.toUsers(options.to)!
     this.cc = Email.toUsers(options.cc)
     this.bcc = Email.toUsers(options.bcc)
+
+    // Validate all email addresses
+    this.validateEmails()
 
     this.subject = options.subject
     this.text = options.text
@@ -145,6 +157,52 @@ export class Email {
     }
   }
 
+  private validateEmails(): void {
+    const invalidEmails: string[] = []
+
+    // Validate from
+    if (!isValidEmail(this.from.email)) {
+      invalidEmails.push(this.from.email)
+    }
+
+    // Validate to
+    for (const user of this.to) {
+      if (!isValidEmail(user.email)) {
+        invalidEmails.push(user.email)
+      }
+    }
+
+    // Validate reply
+    if (this.reply && !isValidEmail(this.reply.email)) {
+      invalidEmails.push(this.reply.email)
+    }
+
+    // Validate cc
+    if (this.cc) {
+      for (const user of this.cc) {
+        if (!isValidEmail(user.email)) {
+          invalidEmails.push(user.email)
+        }
+      }
+    }
+
+    // Validate bcc
+    if (this.bcc) {
+      for (const user of this.bcc) {
+        if (!isValidEmail(user.email)) {
+          invalidEmails.push(user.email)
+        }
+      }
+    }
+
+    if (invalidEmails.length > 0) {
+      throw new InvalidEmailError(
+        `Invalid email address(es): ${invalidEmails.join(', ')}`,
+        invalidEmails,
+      )
+    }
+  }
+
   public getEmailData() {
     this.resolveHeader()
 
@@ -152,8 +210,17 @@ export class Email {
     for (const [key, value] of Object.entries(this.headers)) {
       headersArray.push(`${key}: ${value}`)
     }
+
     const mixedBoundary = this.generateSafeBoundary('mixed_')
+    const relatedBoundary = this.generateSafeBoundary('related_')
     const alternativeBoundary = this.generateSafeBoundary('alternative_')
+
+    // Separate inline and regular attachments
+    // Attachments with cid are treated as inline (cid implies inline usage)
+    const inlineAttachments = this.attachments?.filter(a => a.cid) || []
+    const regularAttachments = this.attachments?.filter(a => !a.cid) || []
+    const hasInlineAttachments = inlineAttachments.length > 0
+    const hasRegularAttachments = regularAttachments.length > 0
 
     headersArray.push(
       `Content-Type: multipart/mixed; boundary="${mixedBoundary}"`,
@@ -162,6 +229,12 @@ export class Email {
 
     let emailData = `${headers}\r\n\r\n`
     emailData += `--${mixedBoundary}\r\n`
+
+    if (hasInlineAttachments) {
+      // Use multipart/related for inline images
+      emailData += `Content-Type: multipart/related; boundary="${relatedBoundary}"\r\n\r\n`
+      emailData += `--${relatedBoundary}\r\n`
+    }
 
     emailData += `Content-Type: multipart/alternative; boundary="${alternativeBoundary}"\r\n\r\n`
 
@@ -183,8 +256,31 @@ export class Email {
 
     emailData += `--${alternativeBoundary}--\r\n`
 
-    if (this.attachments) {
-      for (const attachment of this.attachments) {
+    // Add inline attachments inside related boundary
+    if (hasInlineAttachments) {
+      for (const attachment of inlineAttachments) {
+        const mimeType =
+          attachment.mimeType || this.getMimeType(attachment.filename)
+        emailData += `--${relatedBoundary}\r\n`
+        emailData += `Content-Type: ${mimeType}; name="${attachment.filename}"\r\n`
+        emailData += `Content-Transfer-Encoding: base64\r\n`
+        emailData += `Content-ID: <${attachment.cid}>\r\n`
+        emailData += `Content-Disposition: inline; filename="${attachment.filename}"\r\n\r\n`
+
+        const lines = attachment.content.match(/.{1,72}/g)
+        if (lines) {
+          emailData += `${lines.join('\r\n')}`
+        } else {
+          emailData += `${attachment.content}`
+        }
+        emailData += '\r\n\r\n'
+      }
+      emailData += `--${relatedBoundary}--\r\n`
+    }
+
+    // Add regular attachments
+    if (hasRegularAttachments) {
+      for (const attachment of regularAttachments) {
         const mimeType =
           attachment.mimeType || this.getMimeType(attachment.filename)
         emailData += `--${mixedBoundary}\r\n`

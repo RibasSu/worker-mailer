@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { Email, type EmailOptions, encodeHeader } from '../../src/email'
+import { InvalidEmailError, InvalidContentError } from '../../src/errors'
 import { extract } from 'letterparser'
 
 describe('Email', () => {
@@ -689,6 +690,171 @@ describe('encodeHeader', () => {
       const input = '订单 #12345 已发货！'
       const result = encodeHeader(input)
       expect(result).toMatch(/^=\?UTF-8\?Q\?.*\?=$/)
+    })
+  })
+
+  describe('email validation', () => {
+    it('should accept valid email addresses', () => {
+      const email = new Email({
+        from: 'sender@example.com',
+        to: 'recipient@example.com',
+        subject: 'Test',
+        text: 'Test',
+      })
+      expect(email.from.email).toBe('sender@example.com')
+    })
+
+    it('should throw InvalidEmailError for invalid from address', () => {
+      expect(
+        () =>
+          new Email({
+            from: 'invalid-email',
+            to: 'recipient@example.com',
+            subject: 'Test',
+            text: 'Test',
+          }),
+      ).toThrow(InvalidEmailError)
+    })
+
+    it('should throw InvalidEmailError for invalid to address', () => {
+      expect(
+        () =>
+          new Email({
+            from: 'sender@example.com',
+            to: 'invalid-email',
+            subject: 'Test',
+            text: 'Test',
+          }),
+      ).toThrow(InvalidEmailError)
+    })
+
+    it('should throw InvalidEmailError with list of invalid emails', () => {
+      try {
+        new Email({
+          from: 'bad-from',
+          to: ['valid@example.com', 'bad-to'],
+          cc: 'bad-cc',
+          subject: 'Test',
+          text: 'Test',
+        })
+        expect.fail('Should have thrown')
+      } catch (error) {
+        expect(error).toBeInstanceOf(InvalidEmailError)
+        const invalidError = error as InvalidEmailError
+        expect(invalidError.invalidEmails).toContain('bad-from')
+        expect(invalidError.invalidEmails).toContain('bad-to')
+        expect(invalidError.invalidEmails).toContain('bad-cc')
+      }
+    })
+
+    it('should throw InvalidContentError when no text or html provided', () => {
+      expect(
+        () =>
+          new Email({
+            from: 'sender@example.com',
+            to: 'recipient@example.com',
+            subject: 'Test',
+          }),
+      ).toThrow(InvalidContentError)
+    })
+  })
+
+  describe('inline attachments (CID)', () => {
+    it('should include Content-ID header for inline attachments', () => {
+      const email = new Email({
+        from: 'sender@example.com',
+        to: 'recipient@example.com',
+        subject: 'Test with inline image',
+        html: '<p>Hello <img src="cid:logo@company"></p>',
+        attachments: [
+          {
+            filename: 'logo.png',
+            content: Buffer.from('fake-image-data').toString('base64'),
+            mimeType: 'image/png',
+            cid: 'logo@company',
+            inline: true,
+          },
+        ],
+      })
+      const data = email.getEmailData()
+
+      // Should contain Content-ID header
+      expect(data).toContain('Content-ID:')
+      expect(data).toContain('<logo@company>')
+      expect(data).toContain('Content-Disposition: inline')
+    })
+
+    it('should handle mixed inline and regular attachments', () => {
+      const email = new Email({
+        from: 'sender@example.com',
+        to: 'recipient@example.com',
+        subject: 'Test with mixed attachments',
+        html: '<p>Hello <img src="cid:logo@company"></p>',
+        text: 'Hello',
+        attachments: [
+          {
+            filename: 'logo.png',
+            content: Buffer.from('fake-image-data').toString('base64'),
+            mimeType: 'image/png',
+            cid: 'logo@company',
+            inline: true,
+          },
+          {
+            filename: 'document.pdf',
+            content: Buffer.from('fake-pdf-data').toString('base64'),
+            mimeType: 'application/pdf',
+          },
+        ],
+      })
+      const data = email.getEmailData()
+
+      // Should contain inline attachment with Content-ID
+      expect(data).toContain('Content-ID:')
+      expect(data).toContain('<logo@company>')
+      expect(data).toContain('Content-Disposition: inline')
+
+      // Should contain regular attachment
+      expect(data).toContain('Content-Disposition: attachment')
+      expect(data).toContain('filename="document.pdf"')
+    })
+
+    it('should set cid without inline flag (treated as inline when cid is present)', () => {
+      const email = new Email({
+        from: 'sender@example.com',
+        to: 'recipient@example.com',
+        subject: 'Test',
+        html: '<img src="cid:image@test">',
+        attachments: [
+          {
+            filename: 'image.jpg',
+            content: Buffer.from('fake').toString('base64'),
+            mimeType: 'image/jpeg',
+            cid: 'image@test',
+          },
+        ],
+      })
+      const data = email.getEmailData()
+      expect(data).toContain('Content-ID:')
+      expect(data).toContain('<image@test>')
+    })
+
+    it('should use multipart/related for HTML with inline attachments', () => {
+      const email = new Email({
+        from: 'sender@example.com',
+        to: 'recipient@example.com',
+        subject: 'Test',
+        html: '<img src="cid:image@test">',
+        attachments: [
+          {
+            filename: 'image.jpg',
+            content: Buffer.from('fake').toString('base64'),
+            cid: 'image@test',
+            inline: true,
+          },
+        ],
+      })
+      const data = email.getEmailData()
+      expect(data).toContain('multipart/related')
     })
   })
 })

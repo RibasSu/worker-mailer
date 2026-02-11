@@ -34,6 +34,60 @@ export class BlockingQueue<T> {
   }
 }
 
+/**
+ * Validates an email address format according to RFC 5322 (simplified)
+ * @param email - The email address to validate
+ * @returns true if the email format is valid
+ */
+export function isValidEmail(email: string): boolean {
+  if (!email || typeof email !== 'string') {
+    return false
+  }
+
+  // RFC 5322 compliant email regex (simplified but accurate for most cases)
+  const emailRegex =
+    /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/
+
+  if (!emailRegex.test(email)) {
+    return false
+  }
+
+  // Additional checks
+  const [localPart, domain] = email.split('@')
+
+  // Local part should not exceed 64 characters
+  if (localPart.length > 64) {
+    return false
+  }
+
+  // Domain should not exceed 255 characters
+  if (domain.length > 255) {
+    return false
+  }
+
+  // Domain should have at least one dot (TLD required)
+  if (!domain.includes('.')) {
+    return false
+  }
+
+  // TLD should be at least 2 characters
+  const tld = domain.split('.').pop()
+  if (!tld || tld.length < 2) {
+    return false
+  }
+
+  return true
+}
+
+/**
+ * Validates multiple email addresses and returns invalid ones
+ * @param emails - Array of email addresses to validate
+ * @returns Array of invalid email addresses (empty if all valid)
+ */
+export function validateEmails(emails: string[]): string[] {
+  return emails.filter(email => !isValidEmail(email))
+}
+
 export async function execTimeout<T>(
   promise: Promise<T>,
   ms: number,

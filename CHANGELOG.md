@@ -1,5 +1,15 @@
 # worker-mailer
 
+## 1.3.0
+
+### Minor Changes
+
+- feat: Add email validation with RFC 5322 compliant regex
+- feat: Add custom error classes (InvalidEmailError, SmtpAuthError, SmtpConnectionError, SmtpRecipientError, SmtpTimeoutError, InvalidContentError)
+- feat: Add support for inline attachments with Content-ID (CID) for embedding images in HTML emails
+- feat: Add lifecycle hooks (onConnect, onSent, onError, onClose) for monitoring email operations
+- feat: Add optional Cloudflare Queues integration for async email processing (`@ribassu/worker-mailer/queue`)
+
 ## 1.2.1
 
 ### Patch Changes
