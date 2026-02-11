@@ -1,5 +1,5 @@
 {
-  "name": "worker-mailer",
+  "name": "@ribassu/worker-mailer",
   "version": "1.2.2",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
