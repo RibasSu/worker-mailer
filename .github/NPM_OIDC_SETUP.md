@@ -33,12 +33,40 @@ Click "Add" to save the trusted publisher configuration.
 ## How It Works
 
 When the GitHub Actions workflow runs:
-1. GitHub generates a short-lived OIDC token
-2. The npm CLI (with `--provenance` flag) uses OIDC to authenticate with npm
-3. npm verifies the token matches the trusted publisher configuration
-4. The package is published with automatic provenance attestation
+1. `setup-node` with `registry-url` creates an `.npmrc` file configured for npm registry
+2. GitHub Actions provides an OIDC token via the environment (due to `id-token: write`)
+3. npm CLI (with `--provenance` flag) uses OIDC to authenticate with the registry
+4. npm verifies the OIDC token matches the trusted publisher configuration
+5. The package is published with automatic provenance attestation
 
-**Important**: The workflow does NOT use `registry-url` in `setup-node` to avoid creating a token-based `.npmrc` file. Instead, the registry is configured in `package.json` under `publishConfig.registry`, allowing npm to use OIDC authentication directly.
+**Important**: The `registry-url` in `setup-node` is REQUIRED for OIDC to work. It configures npm to use the registry with OIDC authentication. The key difference from token-based auth is that NO `NODE_AUTH_TOKEN` secret is provided—npm automatically uses OIDC when it's available.
+
+## Workflow Configuration
+
+The correct workflow configuration for OIDC authentication:
+
+```yaml
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write    # Required for OIDC
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'  # Required for OIDC
+      - run: npm ci
+      - run: npm publish --provenance --access public  # No NODE_AUTH_TOKEN needed
+```
+
+**Key points:**
+- `id-token: write` permission enables OIDC
+- `registry-url` is required to configure npm for the registry
+- NO `NODE_AUTH_TOKEN` environment variable in the publish step
+- npm automatically uses OIDC when available
 
 ## Benefits
 
@@ -54,9 +82,10 @@ If publishing fails with authentication errors:
 2. Ensure the workflow filename matches exactly (`publish.yml`)
 3. Check that repository owner/name are correct
 4. Confirm the workflow has `id-token: write` permission (already configured)
-5. Verify that `setup-node` does NOT have `registry-url` configured (this would create a token-based .npmrc)
-6. Ensure `package.json` has the registry in `publishConfig.registry`
-7. Make sure no `NODE_AUTH_TOKEN` or `NPM_TOKEN` secrets are being used
+5. Verify that `setup-node` HAS `registry-url` configured (required for OIDC)
+6. Make sure NO `NODE_AUTH_TOKEN` or `NPM_TOKEN` environment variable is set in the publish step
+7. Check npm CLI version is 11.5.1 or later
+8. Ensure you're using GitHub-hosted runners (self-hosted not supported yet)
 
 ## References
 
