@@ -17,12 +17,13 @@
   "author": "André Ribas (@RibasSu)",
   "repository": {
     "type": "git",
-    "url": "https://github.com/RibasSu/worker-mailer.git"
+    "url": "git+https://github.com/RibasSu/worker-mailer.git"
   },
   "license": "MIT",
   "homepage": "https://github.com/RibasSu/worker-mailer",
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
     "build": "tsup",

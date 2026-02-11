@@ -34,9 +34,11 @@ Click "Add" to save the trusted publisher configuration.
 
 When the GitHub Actions workflow runs:
 1. GitHub generates a short-lived OIDC token
-2. The workflow uses this token to authenticate with npm
+2. The npm CLI (with `--provenance` flag) uses OIDC to authenticate with npm
 3. npm verifies the token matches the trusted publisher configuration
 4. The package is published with automatic provenance attestation
+
+**Important**: The workflow does NOT use `registry-url` in `setup-node` to avoid creating a token-based `.npmrc` file. Instead, the registry is configured in `package.json` under `publishConfig.registry`, allowing npm to use OIDC authentication directly.
 
 ## Benefits
 
@@ -52,6 +54,9 @@ If publishing fails with authentication errors:
 2. Ensure the workflow filename matches exactly (`publish.yml`)
 3. Check that repository owner/name are correct
 4. Confirm the workflow has `id-token: write` permission (already configured)
+5. Verify that `setup-node` does NOT have `registry-url` configured (this would create a token-based .npmrc)
+6. Ensure `package.json` has the registry in `publishConfig.registry`
+7. Make sure no `NODE_AUTH_TOKEN` or `NPM_TOKEN` secrets are being used
 
 ## References
 
