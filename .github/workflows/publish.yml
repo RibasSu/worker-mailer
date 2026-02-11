@@ -1,46 +1,39 @@
-name: Release & Publish
+name: Publish
 
 on:
-  push:
-    branches: [ main ]
+  release:
+    types: [published]
 
 jobs:
-  release:
+  publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      pull-requests: write
-    
+      contents: read
+      id-token: write
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          fetch-depth: 0
-      
+          bun-version: latest
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20.x'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v2
-        with:
-          version: latest
-          
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-        
-      - name: Run tests
-        run: pnpm test
-        
-      - name: Build
-        run: pnpm build
+        run: bun install
 
-      - name: Release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        uses: changesets/action@v1
-        with:
-          publish: pnpm publish --no-git-checks
+      - name: Run tests
+        run: bun run test -- --run
+
+      - name: Build
+        run: bun run build
+
+      - name: Publish to npm
+        run: npm publish --provenance --access public
