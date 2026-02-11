@@ -12,14 +12,23 @@ Worker Mailer is an SMTP client that runs on Cloudflare Workers. It leverages [C
 - 🚀 Completely built on the Cloudflare Workers runtime with no other dependencies
 - 📝 Full TypeScript type support
 - 📧 Supports sending plain text and HTML emails with attachments
+- �️ Inline image attachments with Content-ID (CID) support
 - 🔒 Supports multiple SMTP authentication methods: `plain`, `login`, and `CRAM-MD5`
+- ✅ Email address validation (RFC 5322 compliant)
+- 🎯 Custom error classes for better error handling
+- 🪝 Lifecycle hooks for monitoring email operations
 - 📅 DSN support
+- 📬 Optional Cloudflare Queues integration for async email processing
 
 ## Table of Contents
 
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [API Reference](#api-reference)
+- [Inline Images (CID)](#inline-images-cid)
+- [Lifecycle Hooks](#lifecycle-hooks)
+- [Error Handling](#error-handling)
+- [Cloudflare Queues Integration](#cloudflare-queues-integration)
 - [Limitations](#limitations)
 - [Contributing](#contributing)
 - [License](#license)
@@ -27,7 +36,7 @@ Worker Mailer is an SMTP client that runs on Cloudflare Workers. It leverages [C
 ## Installation
 
 ```shell
-npm i worker-mailer
+npm i @ribassu/worker-mailer
 ```
 
 ## Quick Start
@@ -42,7 +51,7 @@ compatibility_flags = ["nodejs_compat"]
 2. Use in your code:
 
 ```typescript
-import { WorkerMailer } from 'worker-mailer'
+import { WorkerMailer } from '@ribassu/worker-mailer'
 
 // Connect to SMTP server
 const mailer = await WorkerMailer.connect({
@@ -82,7 +91,7 @@ export default defineEventHandler(async event => {
     return await transporter.sendMail()
   } else {
     // Production: Use worker-mailer in Cloudflare Workers environment
-    const { WorkerMailer } = await import('worker-mailer')
+    const { WorkerMailer } = await import('@ribassu/worker-mailer')
     const mailer = await WorkerMailer.connect()
     return await mailer.send()
   }
@@ -116,6 +125,7 @@ type WorkerMailerOptions = {
   logLevel?: LogLevel // Logging level (default: LogLevel.INFO)
   socketTimeoutMs?: number // Socket timeout in milliseconds
   responseTimeoutMs?: number // Server response timeout in milliseconds
+  hooks?: WorkerMailerHooks // Lifecycle hooks for monitoring
   dsn?: {
     RET?: {
       HEADERS?: boolean
@@ -181,9 +191,9 @@ type EmailOptions = {
   text?: string // Plain text content
   html?: string // HTML content
   headers?: Record<string, string> // Custom email headers
-  attachments?: { filename: string; content: string; mimeType?: string }[] // Attachments, content must be base64-encoded, it will try to infer mimeType if not set
+  attachments?: Attachment[] // Attachments
   dsnOverride?: {
-    // overrides dsn defined in WorkerMailer, if not set, it will take the WorkerMailer-Option.
+    // Overrides dsn defined in WorkerMailer
     envelopeId?: string | undefined
     RET?: {
       HEADERS?: boolean
@@ -195,6 +205,14 @@ type EmailOptions = {
       SUCCESS?: boolean
     }
   }
+}
+
+type Attachment = {
+  filename: string
+  content: string // Base64-encoded content
+  mimeType?: string // MIME type (auto-detected if not set)
+  cid?: string // Content-ID for inline images
+  inline?: boolean // If true, attachment will be inline
 }
 ```
 
@@ -223,11 +241,230 @@ await WorkerMailer.send(
       {
         filename: 'test.txt',
         content: 'SGVsbG8gV29ybGQ=', // base64-encoded string for "Hello World"
-        type: 'text/plain',
+        mimeType: 'text/plain',
       },
     ],
   },
 )
+```
+
+## Inline Images (CID)
+
+You can embed images directly in HTML emails using Content-ID (CID):
+
+```typescript
+import { WorkerMailer } from '@ribassu/worker-mailer'
+
+const mailer = await WorkerMailer.connect({
+  host: 'smtp.acme.com',
+  port: 587,
+  credentials: { username: 'user', password: 'pass' },
+})
+
+await mailer.send({
+  from: 'sender@acme.com',
+  to: 'recipient@acme.com',
+  subject: 'Email with embedded image',
+  html: `
+    <h1>Hello!</h1>
+    <p>Here's our logo:</p>
+    <img src="cid:company-logo" alt="Company Logo">
+  `,
+  attachments: [
+    {
+      filename: 'logo.png',
+      content: logoBase64, // Base64-encoded image
+      mimeType: 'image/png',
+      cid: 'company-logo', // Referenced in HTML as cid:company-logo
+      inline: true,
+    },
+  ],
+})
+```
+
+## Lifecycle Hooks
+
+Monitor email operations with lifecycle hooks:
+
+```typescript
+import { WorkerMailer } from '@ribassu/worker-mailer'
+
+const mailer = await WorkerMailer.connect({
+  host: 'smtp.acme.com',
+  port: 587,
+  credentials: { username: 'user', password: 'pass' },
+  hooks: {
+    onConnect: () => {
+      console.log('Connected to SMTP server')
+    },
+    onSent: (email, response) => {
+      console.log(`Email sent to ${email.to}:`, response)
+    },
+    onError: (email, error) => {
+      console.error(`Failed to send email:`, error)
+      // Send to error tracking service, etc.
+    },
+    onClose: error => {
+      if (error) {
+        console.error('Connection closed with error:', error)
+      } else {
+        console.log('Connection closed')
+      }
+    },
+  },
+})
+```
+
+## Error Handling
+
+Worker Mailer provides custom error classes for better error handling:
+
+```typescript
+import {
+  WorkerMailer,
+  InvalidEmailError,
+  SmtpAuthError,
+  SmtpConnectionError,
+  SmtpRecipientError,
+  SmtpTimeoutError,
+  InvalidContentError,
+} from '@ribassu/worker-mailer'
+
+try {
+  const mailer = await WorkerMailer.connect({
+    host: 'smtp.acme.com',
+    port: 587,
+    credentials: { username: 'user', password: 'wrong-password' },
+  })
+
+  await mailer.send({
+    from: 'invalid-email', // This will throw InvalidEmailError
+    to: 'recipient@acme.com',
+    subject: 'Test',
+    text: 'Hello',
+  })
+} catch (error) {
+  if (error instanceof InvalidEmailError) {
+    console.error('Invalid emails:', error.invalidEmails)
+  } else if (error instanceof SmtpAuthError) {
+    console.error('Authentication failed')
+  } else if (error instanceof SmtpConnectionError) {
+    console.error('Could not connect to SMTP server')
+  } else if (error instanceof SmtpRecipientError) {
+    console.error('Recipient rejected:', error.recipient)
+  } else if (error instanceof SmtpTimeoutError) {
+    console.error('Operation timed out')
+  } else if (error instanceof InvalidContentError) {
+    console.error('Invalid email content (missing text or html)')
+  }
+}
+```
+
+## Cloudflare Queues Integration
+
+For high-volume email sending, you can use Cloudflare Queues for async processing:
+
+### Setup
+
+1. Add a Queue binding in `wrangler.toml`:
+
+```toml
+[[queues.producers]]
+queue = "email-queue"
+binding = "EMAIL_QUEUE"
+
+[[queues.consumers]]
+queue = "email-queue"
+max_batch_size = 10
+max_retries = 3
+```
+
+2. Create your worker with queue handler:
+
+```typescript
+import { WorkerMailer } from '@ribassu/worker-mailer'
+import {
+  createQueueHandler,
+  enqueueEmail,
+  type QueueEmailMessage,
+} from '@ribassu/worker-mailer/queue'
+
+interface Env {
+  EMAIL_QUEUE: Queue<QueueEmailMessage>
+}
+
+export default {
+  // Handle HTTP requests - enqueue emails
+  async fetch(request: Request, env: Env): Promise<Response> {
+    await enqueueEmail(env.EMAIL_QUEUE, {
+      mailerOptions: {
+        host: 'smtp.acme.com',
+        port: 587,
+        credentials: { username: 'user', password: 'pass' },
+        authType: 'plain',
+      },
+      emailOptions: {
+        from: 'sender@acme.com',
+        to: 'recipient@acme.com',
+        subject: 'Hello from Queue',
+        text: 'This email was sent via Cloudflare Queues!',
+      },
+    })
+
+    return new Response('Email queued successfully')
+  },
+
+  // Process queued emails
+  async queue(batch: MessageBatch<QueueEmailMessage>, env: Env): Promise<void> {
+    const handler = createQueueHandler({
+      onSuccess: result => console.log('Email sent:', result.emailOptions.to),
+      onError: result => console.error('Failed:', result.error),
+    })
+
+    await handler(batch)
+  },
+}
+```
+
+### Queue Helper Functions
+
+```typescript
+import {
+  enqueueEmail,
+  enqueueEmails,
+  type QueueEmailMessage,
+} from '@ribassu/worker-mailer/queue'
+
+// Enqueue a single email
+await enqueueEmail(env.EMAIL_QUEUE, {
+  mailerOptions: { host: 'smtp.acme.com', port: 587 /* ... */ },
+  emailOptions: {
+    from: 'a@b.com',
+    to: 'c@d.com',
+    subject: 'Hi',
+    text: 'Hello',
+  },
+})
+
+// Enqueue multiple emails at once
+await enqueueEmails(env.EMAIL_QUEUE, [
+  {
+    mailerOptions: {
+      /* ... */
+    },
+    emailOptions: {
+      /* ... */
+    },
+  },
+  {
+    mailerOptions: {
+      /* ... */
+    },
+    emailOptions: {
+      /* ... */
+    },
+  },
+])
 ```
 
 ## Limitations
@@ -244,25 +481,25 @@ await WorkerMailer.send(
 1. Fork and clone the repository
 2. Install dependencies:
    ```bash
-   pnpm install
+   bun install
    ```
 3. Create a new branch for your feature from `develop`:
    ```bash
    git checkout -b feat/your-feature-name
    ```
 4. Make your changes and make sure all tests pass
-5. Update README.md & changelog `pnpm changeset` if needed
+5. Update README.md & changelog `bun changeset` if needed
 6. Push your changes to your fork and create a pull request from your branch to `develop`
 
 ### Testing
 
 1. Unit Tests:
    ```bash
-   npm test
+   bun test
    ```
 2. Integration Tests:
    ```bash
-   pnpm dlx wrangler dev ./test/worker.ts
+   bunx wrangler dev ./test/worker.ts
    ```
    Then, send a POST request to `http://127.0.0.1:8787` with the following JSON body:
    ```json
