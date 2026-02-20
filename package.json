@@ -51,7 +51,7 @@
     "letterparser": "^0.1.8",
     "libqp": "^2.1.1",
     "prettier": "^3.8.1",
-    "tsup": "^8.5.1",
+    "tsup": "^8.3.5",
     "typescript": "^5.9.3",
     "vitest": "^3.2.0",
     "wrangler": "^4.64.0"
