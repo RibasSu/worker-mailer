@@ -1,6 +1,7 @@
 {
   "name": "@ribassu/worker-mailer",
   "version": "1.3.3",
+  "packageManager": "bun@1.3.11",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
