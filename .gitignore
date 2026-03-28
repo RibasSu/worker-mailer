@@ -11,3 +11,5 @@ dist/
 
 # Cloudflare
 .wrangler/
+
+scripts/
