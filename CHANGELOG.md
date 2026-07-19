@@ -5,7 +5,7 @@
 ### Changes
 
 - a6ab686: migrate project metadata to Bun and remove `pnpm-lock.yaml`
-- migrate the build from tsup to tsdown and update the Cloudflare/Vitest toolchain
+- migrate the build from tsup to tsdown, update the Cloudflare/Vitest toolchain, and adopt the native TypeScript 7 compiler
 - warn users that future updates are moving to `@workermailer/smtp`
 
 ## 1.3.3

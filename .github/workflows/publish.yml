@@ -47,6 +47,9 @@ jobs:
             exit 1
           fi
 
+      - name: Typecheck
+        run: bun run typecheck
+
       - name: Run tests
         run: bun run test -- --run
 
