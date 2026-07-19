@@ -2,11 +2,16 @@
 
 ## Unreleased
 
-### Changes
+## 1.4.0
+
+### Minor Changes
 
 - a6ab686: migrate project metadata to Bun and remove `pnpm-lock.yaml`
-- migrate the build from tsup to tsdown, update the Cloudflare/Vitest toolchain, and adopt the native TypeScript 7 compiler
-- warn users that future updates are moving to `@workermailer/smtp`
+- 9fd9867: restore and consolidate the project changelog
+- 5f6c37b: harden the npm publication workflow with release version validation and trusted publishing permissions
+- 8dcb1b5: migrate the build from tsup to tsdown, update the Cloudflare/Vitest toolchain, and warn users about the move to `@workermailer/smtp`
+- e30612a: adopt TypeScript 7, pin the reviewed build toolchain, remove unused vulnerable dependencies, and add typechecking to CI and npm publication
+- 00d7e30: release version 1.4.0
 
 ## 1.3.3
 
