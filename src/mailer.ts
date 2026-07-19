@@ -8,6 +8,9 @@ import {
   SmtpRecipientError,
   SmtpTimeoutError,
 } from './errors'
+import { warnPackageMigration } from './deprecation'
+
+warnPackageMigration()
 
 export type AuthType = 'plain' | 'login' | 'cram-md5'
 export type Credentials = {
